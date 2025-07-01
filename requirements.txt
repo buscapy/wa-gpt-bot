@@ -1,5 +1,15 @@
-fastapi
-uvicorn[standard]
-sentry-sdk
 sqlmodel>=0.0.16
 pyjwt[crypto]>=2.8
+# backend/requirements.txt del template
+fastapi
+uvicorn[standard]
+python-jose[cryptography]
+passlib[bcrypt]
+python-multipart
+email-validator
+sqlmodel
+alembic
+psycopg2-binary
+pydantic-settings
+PyJWT
+sentry-sdk
