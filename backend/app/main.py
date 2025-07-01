@@ -38,3 +38,26 @@ def read_root() -> dict:
     return {"message": "Welcome to wa-gpt-bot API"}
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
+# --- WhatsApp Webhook -------------------------------------------------
+from fastapi import Request, status
+import os, logging
+
+VERIFY_TOKEN = os.getenv("WA_VERIFY_TOKEN", "olindarivas")
+
+@app.get("/webhook")
+async def verify(mode: str | None = None,
+                 challenge: str | None = None,
+                 verify_token: str | None = None):
+    """Meta envía un GET first-time para validar la URL."""
+    if mode == "subscribe" and verify_token == VERIFY_TOKEN:
+        return challenge
+    return "error", status.HTTP_403_FORBIDDEN
+
+@app.post("/webhook")
+async def receive(req: Request):
+    """Recibe mensajes desde Meta. Por ahora solo imprime el JSON."""
+    body = await req.json()
+    logging.info(body)      # lo verás en los logs de Render
+    return {"status": "ok"}  # ACK instantáneo (<10 s)
+
