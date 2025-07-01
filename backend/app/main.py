@@ -41,23 +41,30 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 
 # --- WhatsApp Webhook -------------------------------------------------
 from fastapi import Request, status
+from fastapi.responses import PlainTextResponse
 import os, logging
 
 VERIFY_TOKEN = os.getenv("WA_VERIFY_TOKEN", "olindarivas")
 
 @app.get("/webhook", tags=["webhook"])
-async def verify(mode: str | None = None,
-                 challenge: str | None = None,
-                 verify_token: str | None = None):
-    """Meta envía un GET first-time para validar la URL."""
-    if mode == "subscribe" and verify_token == VERIFY_TOKEN:
-        return challenge
-    return "error", status.HTTP_403_FORBIDDEN
+async def verify(request: Request):
+    """
+    Meta valida la URL con un GET.
+    Parámetros recibidos: hub.mode, hub.verify_token, hub.challenge
+    """
+    params     = request.query_params
+    mode       = params.get("hub.mode")
+    token      = params.get("hub.verify_token")
+    challenge  = params.get("hub.challenge")
+
+    if mode == "subscribe" and token == VERIFY_TOKEN:
+        return PlainTextResponse(challenge or "")
+    return PlainTextResponse("error",
+                             status_code=status.HTTP_403_FORBIDDEN)
 
 @app.post("/webhook", tags=["webhook"])
 async def receive(req: Request):
-    """Recibe mensajes desde Meta. Por ahora solo imprime el JSON."""
+    """Recibe mensajes; por ahora solo los imprime en los logs."""
     body = await req.json()
-    logging.info(body)      # lo verás en los logs de Render
-    return {"status": "ok"}  # ACK instantáneo (<10 s)
-
+    logging.info(body)
+    return {"status": "ok"}   # WhatsApp necesita 200 en <10 s
