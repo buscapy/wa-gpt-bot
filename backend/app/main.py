@@ -132,3 +132,39 @@ async def receive(request: Request):
 
     # WhatsApp exige 200 OK rápidamente aunque haya errores internos
     return {"status": "ok"}
+@app.post("/webhook", tags=["webhook"])
+async def receive(request: Request):
+    """
+    • Extrae el texto entrante.
+    • Pide respuesta a GPT.
+    • La envía a WhatsApp.
+    • (Opcional) La devuelve en el body cuando DEBUG_ECHO=true
+      o cuando el header X-Debug: 1 esté presente.
+    """
+    body = await request.json()
+    logging.info(body)
+
+    gpt_reply = ""
+    try:
+        msg   = body["entry"][0]["changes"][0]["value"]["messages"][0]
+        text  = msg["text"]["body"]
+        wid   = msg["from"]
+
+        gpt_reply = await chat_gpt(text)
+        logging.info("GPT reply: %s", gpt_reply)
+
+        await send_whatsapp(wid, gpt_reply)
+
+    except Exception as exc:
+        logging.exception("Error procesando mensaje: %s", exc)
+
+    # ---------- decidir qué devolver ----------
+    debug_env   = os.getenv("DEBUG_ECHO", "false").lower() == "true"
+    debug_header = request.headers.get("x-debug") == "1"
+
+    if debug_env or debug_header:
+        # Mostrar también el texto de GPT
+        return {"status": "ok", "gpt_reply": gpt_reply}
+
+    # Respuesta mínima para Meta
+    return {"status": "ok"}
