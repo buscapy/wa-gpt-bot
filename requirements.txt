@@ -13,3 +13,5 @@ psycopg2-binary
 pydantic-settings
 PyJWT
 sentry-sdk
+psycopg[binary]
+
