@@ -2,8 +2,8 @@ import os
 import logging
 
 import sentry_sdk
-import openai                # ← SDK oficial de OpenAI
-import httpx                 # ← cliente HTTP async (ya está en requirements.txt de FastAPI, si no lo añades)
+import openai                  # SDK oficial de OpenAI
+import httpx                   # Cliente HTTP async
 from fastapi import FastAPI, Request, status
 from fastapi.responses import PlainTextResponse
 from fastapi.routing import APIRoute
@@ -27,7 +27,7 @@ app = FastAPI(
     generate_unique_id_function=custom_generate_unique_id,
 )
 
-# CORS si lo necesitas
+# CORS (opcional)
 if settings.all_cors_origins:
     app.add_middleware(
         CORSMiddleware,
@@ -37,7 +37,7 @@ if settings.all_cors_origins:
         allow_headers=["*"],
     )
 
-# Endpoints básicos de salud
+# Endpoints básicos
 @app.get("/ping", tags=["health"])
 def ping() -> dict:
     return {"message": "pong"}
@@ -46,21 +46,21 @@ def ping() -> dict:
 def read_root() -> dict:
     return {"message": "Welcome to wa-gpt-bot API"}
 
-# Router principal (endpoints de tu proyecto)
+# Router principal
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
 
-# ---------- Variables de entorno necesarias ---------- #
-VERIFY_TOKEN      = os.getenv("WA_VERIFY_TOKEN", "olindarivas")
-PHONE_ID          = os.getenv("WA_PHONE_NUMBER_ID")      # la obtienes en Meta Step 1
-ACCESS_TOKEN      = os.getenv("WA_ACCESS_TOKEN")         # token temporal o permanente
-openai.api_key    = os.getenv("OPENAI_API_KEY")          # clave de OpenAI
-GRAPH_API_URL     = f"https://graph.facebook.com/v19.0/{PHONE_ID}/messages"
+# ---------- Variables de entorno ---------- #
+VERIFY_TOKEN   = os.getenv("WA_VERIFY_TOKEN", "olindarivas")
+PHONE_ID       = os.getenv("WA_PHONE_NUMBER_ID")          # lo da Meta
+ACCESS_TOKEN   = os.getenv("WA_ACCESS_TOKEN")             # token temporal/permanente
+openai.api_key = os.getenv("OPENAI_API_KEY")              # clave de OpenAI
+GRAPH_API_URL  = f"https://graph.facebook.com/v19.0/{PHONE_ID}/messages"
 
 
 # ---------- Utilidades GPT y WhatsApp ---------- #
 async def chat_gpt(user_text: str) -> str:
-    """Pide una respuesta a GPT-4o Mini (puedes cambiar de modelo)."""
+    """Devuelve una respuesta concisa en español usando GPT-4o Mini."""
     rsp = openai.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
@@ -74,7 +74,11 @@ async def chat_gpt(user_text: str) -> str:
 
 
 async def send_whatsapp(to: str, text: str):
-    """Envía texto a un usuario de WhatsApp."""
+    """Envía `text` a un usuario de WhatsApp Cloud API."""
+    if not (PHONE_ID and ACCESS_TOKEN):
+        logging.warning("WA credentials missing; skipping send.")
+        return
+
     headers = {
         "Authorization": f"Bearer {ACCESS_TOKEN}",
         "Content-Type": "application/json",
@@ -83,72 +87,44 @@ async def send_whatsapp(to: str, text: str):
         "messaging_product": "whatsapp",
         "to": to,
         "type": "text",
-        "text": {"body": text[:4096]},      # 4096 = límite de WhatsApp
+        "text": {"body": text[:4096]},
     }
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.post(GRAPH_API_URL, headers=headers, json=data)
-        r.raise_for_status()               # si falla, lanza excepción
+        r.raise_for_status()   # lanza excepción si falla
 
 
 # ---------- Webhook de WhatsApp Cloud API ---------- #
 @app.get("/webhook", tags=["webhook"])
 async def verify(request: Request):
     """
-    Meta valida la URL con un GET único.
+    Meta valida la URL con un GET.
     Recibimos: hub.mode, hub.verify_token, hub.challenge
     """
-    params     = request.query_params
-    mode       = params.get("hub.mode")
-    token      = params.get("hub.verify_token")
-    challenge  = params.get("hub.challenge")
-
-    if mode == "subscribe" and token == VERIFY_TOKEN:
-        return PlainTextResponse(challenge or "")
-    return PlainTextResponse("error",
-                             status_code=status.HTTP_403_FORBIDDEN)
+    q = request.query_params
+    if q.get("hub.mode") == "subscribe" and q.get("hub.verify_token") == VERIFY_TOKEN:
+        return PlainTextResponse(q.get("hub.challenge") or "")
+    return PlainTextResponse("error", status_code=status.HTTP_403_FORBIDDEN)
 
 
 @app.post("/webhook", tags=["webhook"])
 async def receive(request: Request):
     """
-    Recibe mensajes entrantes.
-    • Extrae el texto.
-    • Pregunta a GPT.
-    • Responde al mismo usuario.
-    """
-    body = await request.json()
-    logging.info(body)                     # ver JSON entrante en Logs
-
-    try:
-        msg   = body["entry"][0]["changes"][0]["value"]["messages"][0]
-        text  = msg["text"]["body"]
-        wid   = msg["from"]               # WhatsApp ID del usuario
-
-        reply = await chat_gpt(text)
-        await send_whatsapp(wid, reply)
-
-    except Exception as exc:
-        logging.exception("Error procesando mensaje: %s", exc)
-
-    # WhatsApp exige 200 OK rápidamente aunque haya errores internos
-    return {"status": "ok"}
-@app.post("/webhook", tags=["webhook"])
-async def receive(request: Request):
-    """
-    • Extrae el texto entrante.
-    • Pide respuesta a GPT.
-    • La envía a WhatsApp.
-    • (Opcional) La devuelve en el body cuando DEBUG_ECHO=true
-      o cuando el header X-Debug: 1 esté presente.
+    • Extrae el texto entrante
+    • Pregunta a GPT
+    • Envía la respuesta a WhatsApp
+    • Devuelve la respuesta de GPT cuando:
+        – DEBUG_ECHO=true  (env var)  **o**
+        – X-Debug: 1       (header)
     """
     body = await request.json()
     logging.info(body)
 
     gpt_reply = ""
     try:
-        msg   = body["entry"][0]["changes"][0]["value"]["messages"][0]
-        text  = msg["text"]["body"]
-        wid   = msg["from"]
+        msg  = body["entry"][0]["changes"][0]["value"]["messages"][0]
+        text = msg["text"]["body"]
+        wid  = msg["from"]
 
         gpt_reply = await chat_gpt(text)
         logging.info("GPT reply: %s", gpt_reply)
@@ -158,13 +134,11 @@ async def receive(request: Request):
     except Exception as exc:
         logging.exception("Error procesando mensaje: %s", exc)
 
-    # ---------- decidir qué devolver ----------
-    debug_env   = os.getenv("DEBUG_ECHO", "false").lower() == "true"
+    # --- decidir si incluimos la respuesta en el body ---
+    debug_env    = os.getenv("DEBUG_ECHO", "false").lower() == "true"
     debug_header = request.headers.get("x-debug") == "1"
 
     if debug_env or debug_header:
-        # Mostrar también el texto de GPT
         return {"status": "ok", "gpt_reply": gpt_reply}
 
-    # Respuesta mínima para Meta
     return {"status": "ok"}
