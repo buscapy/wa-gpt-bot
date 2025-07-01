@@ -45,7 +45,7 @@ import os, logging
 
 VERIFY_TOKEN = os.getenv("WA_VERIFY_TOKEN", "olindarivas")
 
-@app.get("/webhook")
+@app.get("/webhook", tags=["webhook"])
 async def verify(mode: str | None = None,
                  challenge: str | None = None,
                  verify_token: str | None = None):
@@ -54,7 +54,7 @@ async def verify(mode: str | None = None,
         return challenge
     return "error", status.HTTP_403_FORBIDDEN
 
-@app.post("/webhook")
+@app.post("/webhook", tags=["webhook"])
 async def receive(req: Request):
     """Recibe mensajes desde Meta. Por ahora solo imprime el JSON."""
     body = await req.json()
