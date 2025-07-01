@@ -15,7 +15,7 @@ email-validator==2.2.0
 # DB & ORM
 sqlmodel==0.0.24               # incluye SQLAlchemy 2 y Pydantic 2
 alembic==1.16.2
-psycopg2-binary==2.9.10        # usa el motor «psycopg2» clásico  
+psycopg[binary]==3.2.9          
 #  -- Si prefieres psycopg3 cambia esta línea por «psycopg[binary]==3.2.9»
 pydantic-settings==2.10.1
 
