@@ -29,5 +29,7 @@ if settings.all_cors_origins:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-
+@app.get("/ping", tags=["health"])
+def ping() -> dict:
+    return {"message": "pong"}
 app.include_router(api_router, prefix=settings.API_V1_STR)
