@@ -4,6 +4,9 @@
 import os
 import logging
 
+import json               # ⬅️ nuevo
+from typing import Any    # ⬅️ nuevo
+
 import sentry_sdk
 import openai                  # SDK oficial de OpenAI
 import httpx                   # Cliente HTTP async
