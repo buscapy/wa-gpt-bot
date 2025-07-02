@@ -1,72 +1,40 @@
-from datetime import date
-from fastapi import APIRouter, Request, HTTPException
-from pydantic import BaseModel, Field
-from typing import Any, Dict, List
+from __future__ import annotations
 
-# ─── helpers ────────────────────────────────────────────────────────────────────
-from app.services.openai_helper import get_price_url   # genera la URL de búsqueda
-from app.scrapers.basic import scrape                  # hace el scraping real
+from fastapi import APIRouter
+from pydantic import BaseModel
+
+from app.services.openai_helper import get_price_url
+from app.scrapers.basic import scrape
 
 router = APIRouter()
 
 
-# ─── schema de salida ───────────────────────────────────────────────────────────
-class PriceOut(BaseModel):
-    price: str = Field(..., description="Precio formateado (ej. '2.450.000 Gs')")
-    date: str = Field(..., description="Fecha YYYY-MM-DD")
-    shop: str = Field(..., description="Tienda o marketplace")
-    city: str = Field(..., description="Ciudad")
+class PriceIn(BaseModel):
+    product: str
 
 
-# ─── tiny helpers ───────────────────────────────────────────────────────────────
-def pick_first(result: Any) -> Dict[str, Any]:
+@router.post("/price")
+async def get_price(payload: PriceIn) -> dict:
     """
-    Normaliza la primera entrada independientemente de la forma que
-    devuelva el scraper:
+    • Construye la URL con la ayuda de openai_helper
+    • Lanza el scraper
+    • Devuelve:
 
-    • lista de dicts  → toma el primer elemento
-    • dict plano      → lo devuelve tal cual si incluye 'price'
-    • dict de dicts   → toma el primer value()
+        – {"price":"#", "product": … }               si el scraper no halló datos
+        – {"price": "...", "shop": "...", ... }      con el primer match
     """
-    if isinstance(result, list):                        # [ {...}, {...} ]
-        return result[0] if result else {}
-    if isinstance(result, dict):
-        if "price" in result:                           # {"price": "...", ...}
-            return result
-        # {"0": {...}, "1": {...}}  ó  {0: {...}}
-        try:
-            return next(iter(result.values()))
-        except StopIteration:
-            return {}
-    return {}                                           # formato desconocido
+    url = get_price_url(payload.product)
+    data = scrape(url)
 
+    # ── 1) bandera “sin datos” ────────────────────────────────────────
+    if isinstance(data, dict) and data.get("price") == "#":
+        return {"price": "#", "product": payload.product}
 
-# ─── endpoint /price ────────────────────────────────────────────────────────────
-@router.post("/price", response_model=PriceOut, tags=["price"])
-async def get_price(request: Request):
-    """
-    Body esperado:  { "product": "<texto del producto>" }
+    # ── 2) al menos un precio válido ──────────────────────────────────
+    if isinstance(data, list) and data:
+        first = data[0]
+        first["product"] = payload.product
+        return first
 
-    Devuelve: PriceOut  (único dict con los campos normalizados)
-    """
-    body = await request.json()
-    product: str = body.get("product", "").strip()
-
-    if not product:
-        raise HTTPException(400, detail="Campo 'product' requerido")
-
-    url = get_price_url(product)        # 1) URL destino
-    raw_results = scrape(url)           # 2) Scrape
-
-    first = pick_first(raw_results)     # 3) Normalizar
-
-    if not first or not first.get("price"):
-        raise HTTPException(404, detail="Sin resultados")
-
-    # 4) Completar campos y devolver
-    return {
-        "price": first.get("price", "N/D"),
-        "date": first.get("date") or date.today().isoformat(),
-        "shop": first.get("shop", "Desconocido"),
-        "city": first.get("city", "Paraguay"),
-    }
+    # ── 3) cualquier otro caso inesperado ─────────────────────────────
+    return {"price": "#", "product": payload.product}
