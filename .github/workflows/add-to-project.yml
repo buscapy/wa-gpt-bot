@@ -1,15 +1,19 @@
 name: Add to Project
 
+# -------------  DESACTIVADO TEMPORALMENTE  -------------
+# Quita “if: false” (o cámbialo a “if: github.event_name != 'pull_request'”)
+# cuando quieras volver a activar el job.
+# -------------------------------------------------------
+
 on:
   pull_request_target:
-  issues:
     types:
       - opened
       - reopened
 
 jobs:
   add-to-project:
-    name: Add to project
+    if: false            # ← desactiva el job
     runs-on: ubuntu-latest
     steps:
       - uses: actions/add-to-project@v1.0.2
