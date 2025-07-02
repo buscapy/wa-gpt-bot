@@ -2,10 +2,13 @@ name: Add to Project
 
 on:
   pull_request_target:
-  issues:
-    types:
-      - opened
-      - reopened
+    paths-ignore:
+      - '**'          # esactiva temporalmente
+    issues:
+      types:
+        - opened
+        - reopened
+
 
 jobs:
   add-to-project:
