@@ -51,18 +51,15 @@ def read_root() -> dict:
 
 
 # ---------- Routers de la API v1 ---------- #
-# Router central con todos los endpoints bajo /api/v1
-app.include_router(api_router, prefix=settings.API_V1_STR)
-
-# Nuevo endpoint /api/v1/price
-app.include_router(price_router, prefix=settings.API_V1_STR, tags=["price"])
+app.include_router(api_router, prefix=settings.API_V1_STR)        # router central
+app.include_router(price_router, prefix=settings.API_V1_STR, tags=["price"])  # /api/v1/price
 
 
 # ---------- Variables de entorno para WhatsApp ---------- #
 VERIFY_TOKEN   = os.getenv("WA_VERIFY_TOKEN", "olindarivas")
-PHONE_ID       = os.getenv("WA_PHONE_NUMBER_ID")         # lo da Meta
-ACCESS_TOKEN   = os.getenv("WA_ACCESS_TOKEN")            # token temporal/permanente
-openai.api_key = os.getenv("OPENAI_API_KEY")             # clave de OpenAI
+PHONE_ID       = os.getenv("WA_PHONE_NUMBER_ID")
+ACCESS_TOKEN   = os.getenv("WA_ACCESS_TOKEN")
+openai.api_key = os.getenv("OPENAI_API_KEY")
 GRAPH_API_URL  = f"https://graph.facebook.com/v19.0/{PHONE_ID}/messages"
 
 
@@ -73,9 +70,9 @@ async def chat_gpt(user_text: str) -> str:
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "Eres un asistente conciso en español."},
-            {"role": "user", "content": user_text}
+            {"role": "user", "content": user_text},
         ],
-        max_tokens=300
+        max_tokens=300,
     )
     return rsp.choices[0].message.content.strip()
 
@@ -98,16 +95,12 @@ async def send_whatsapp(to: str, text: str):
     }
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.post(GRAPH_API_URL, headers=headers, json=data)
-        r.raise_for_status()
+        r.raise_for_status()   # lanza excepción si falla
 
 
 # ---------- Webhook de WhatsApp Cloud API ---------- #
 @app.get("/webhook", tags=["webhook"])
 async def verify(request: Request):
-    """
-    Meta valida la URL con un GET.
-    Recibimos: hub.mode, hub.verify_token, hub.challenge
-    """
     q = request.query_params
     if q.get("hub.mode") == "subscribe" and q.get("hub.verify_token") == VERIFY_TOKEN:
         return PlainTextResponse(q.get("hub.challenge") or "")
@@ -121,8 +114,8 @@ async def receive(request: Request):
     • Pregunta a GPT
     • Envía la respuesta a WhatsApp
     • Devuelve la respuesta de GPT cuando:
-        – DEBUG_ECHO=true  (env var)  **o**
-        – X-Debug: 1       (header)
+        – DEBUG_ECHO=true (env var) **o**
+        – X-Debug: 1      (header)
     """
     body = await request.json()
     logging.info(body)
@@ -141,6 +134,7 @@ async def receive(request: Request):
     except Exception as exc:
         logging.exception("Error procesando mensaje: %s", exc)
 
+    # --- decidir si incluimos la respuesta en el body ---
     debug_env    = os.getenv("DEBUG_ECHO", "false").lower() == "true"
     debug_header = request.headers.get("x-debug") == "1"
 
