@@ -1,45 +1,56 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from datetime import date
+from fastapi import APIRouter, Request, HTTPException
+from pydantic import BaseModel, Field
 
-from app.services.openai_helper import get_price_url
-from app.scrapers.basic import scrape
+# ─── helpers propios ────────────────────────────────────────────────────────────
+from app.services.openai_helper import get_price_url          # genera la URL
+from app.scrapers.basic import scrape                         # hace el scraping
 
 router = APIRouter()
 
 
-# ---------- Esquemas de entrada / salida ---------- #
-class PriceIn(BaseModel):
-    product: str
-
-
+# ─── schema de salida ───────────────────────────────────────────────────────────
 class PriceOut(BaseModel):
-    product: str
-    results: list        # lo que devuelva el scraper
-    source_url: str
+    price: str = Field(..., description="Precio formateado, ej. '2.450.000 Gs'")
+    date: str = Field(..., description="Fecha de obtención (YYYY-MM-DD)")
+    shop: str = Field(..., description="Nombre de la tienda / marketplace")
+    city: str = Field(..., description="Ciudad donde aplica el precio")
 
 
-# ---------- Endpoint /api/v1/price ---------- #
+# ─── endpoint ───────────────────────────────────────────────────────────────────
 @router.post("/price", response_model=PriceOut, tags=["price"])
-async def get_price(payload: PriceIn):
+async def get_price(request: Request):
     """
-    Recibe:   { "product": "heladera no frost" }
+    Devuelve el mejor precio actual de un producto en Paraguay.
 
-    1. Genera la URL de búsqueda.
-    2. Ejecuta el scraper.
-    3. Devuelve JSON con:
-       • product
-       • results  (lista de precios / tiendas)
-       • source_url
+    Espera un JSON como:
+        { "product": "lavarropas midea automatico" }
+
+    Retorna un único dict (validado por PriceOut).  
+    FastAPI se encarga de serializar la respuesta.
     """
-    product = payload.product.strip()
+    body = await request.json()
+    product: str = body.get("product", "").strip()
+
     if not product:
-        raise HTTPException(status_code=400, detail="Falta el campo 'product'")
+        raise HTTPException(status_code=400, detail="Campo 'product' requerido")
 
+    # 1️⃣ Construir URL de búsqueda
     url = get_price_url(product)
-    scraped = scrape(url)        # ⬅️ tu función existente
 
+    # 2️⃣ Scrapear resultados
+    results = scrape(url)  # ← debe devolver una lista de dicts compatibles
+
+    if not results:
+        raise HTTPException(status_code=404, detail="Sin resultados")
+
+    # 3️⃣ Tomamos el primer resultado válido
+    first = results[0]
+
+    # 4️⃣ Aseguramos campos mínimos y devolvemos
     return {
-        "product":   product,
-        "results":   scraped,
-        "source_url": url,
+        "price": first.get("price", "N/D"),
+        "date": first.get("date") or date.today().isoformat(),
+        "shop": first.get("shop", "Desconocido"),
+        "city": first.get("city", "Paraguay"),
     }
