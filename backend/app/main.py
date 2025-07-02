@@ -69,18 +69,30 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 GRAPH_API_URL  = f"https://graph.facebook.com/v19.0/{PHONE_ID}/messages"
 
 
-# ---------- Utilidades GPT y WhatsApp ---------- #
-async def chat_gpt(user_text: str) -> str:
-    """Devuelve una respuesta concisa en español usando GPT-4o Mini."""
+# ---------- GPT con “tools” ---------- #
+from app.gpt.tools import price_function      # <— lo creaste en el paso 1
+
+async def chat_gpt(user_text: str) -> Any:
+    """
+    Llamada 1 : GPT decide si contesta directo
+               o invoca la tool get_price.
+    Devuelve el objeto Response completo.
+    """
     rsp = openai.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": "Eres un asistente conciso en español."},
-            {"role": "user", "content": user_text},
+            {"role": "system",
+             "content": (
+                 "Eres un asistente conciso en español. "
+                 "Cuando te pidan un precio real usa la función get_price."
+             )},
+            {"role": "user", "content": user_text}
         ],
+        tools=[price_function],
+        tool_choice="auto",
         max_tokens=300,
     )
-    return rsp.choices[0].message.content.strip()
+    return rsp        # devolvemos el objeto completo
 
 
 async def send_whatsapp(to: str, text: str):
