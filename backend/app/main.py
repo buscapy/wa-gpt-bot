@@ -1,14 +1,14 @@
-# backend/app/main.py
 # mypy: ignore-errors
+from __future__ import annotations
 
 import os
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 import sentry_sdk
-import openai                      # SDK oficial de OpenAI
-import httpx                       # Cliente HTTP async
+import openai
+import httpx
 from fastapi import FastAPI, Request, status
 from fastapi.responses import PlainTextResponse
 from fastapi.routing import APIRoute
@@ -17,12 +17,9 @@ from starlette.middleware.cors import CORSMiddleware
 from app.api.main import api_router
 from app.api.v1.price import router as price_router
 from app.core.config import settings
-from app.gpt.tools import price_function          # ← definición de la tool
+from app.gpt.tools import price_function
 
-# ---------------------------------------------------------------------------
-# configuración general de FastAPI
-# ---------------------------------------------------------------------------
-
+# ────────────────────────── FastAPI base ─────────────────────────────
 def custom_generate_unique_id(route: APIRoute) -> str:
     return f"{route.tags[0]}-{route.name}"
 
@@ -45,54 +42,50 @@ if settings.all_cors_origins:
         allow_headers=["*"],
     )
 
-# ---------------------------------------------------------------------------
-# rutas básicas
-# ---------------------------------------------------------------------------
-
+# ───────────────────────────── routes ────────────────────────────────
 @app.get("/ping", tags=["health"])
-def ping() -> Dict[str, str]:
+def ping() -> dict:
     return {"message": "pong"}
 
+
 @app.get("/", tags=["root"])
-def read_root() -> Dict[str, str]:
+def read_root() -> dict:
     return {"message": "Welcome to wa-gpt-bot API"}
 
-# API routers
+
 app.include_router(api_router,   prefix=settings.API_V1_STR)
 app.include_router(price_router, prefix=settings.API_V1_STR, tags=["price"])
 
-# ---------------------------------------------------------------------------
-# variables de entorno (WhatsApp Cloud API)
-# ---------------------------------------------------------------------------
-
+# ─────────────────── credenciales & contantes ───────────────────────
 VERIFY_TOKEN   = os.getenv("WA_VERIFY_TOKEN", "olindarivas")
 PHONE_ID       = os.getenv("WA_PHONE_NUMBER_ID")
 ACCESS_TOKEN   = os.getenv("WA_ACCESS_TOKEN")
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 GRAPH_API_URL  = f"https://graph.facebook.com/v19.0/{PHONE_ID}/messages"
-INTERNAL_PORT  = os.getenv("PORT", "10000")                     # Render PORT
+INTERNAL_PORT  = os.getenv("PORT", "10000")               # Render expone PORT=10000
 
-# prompt fijo para ChatGPT
-SYSTEM_PROMPT = (
-    "Eres un asistente conciso en español. "
-    "Cuando el usuario pida un precio real usa la función get_price."
-)
-
-# ---------------------------------------------------------------------------
-# 1) helper para la 1ª llamada a GPT (con tools)
-# ---------------------------------------------------------------------------
-
-async def chat_gpt(user_text: str) -> Any:
+# ───────────────────── GPT — primera pasada ─────────────────────────
+def chat_gpt(user_text: str) -> Any:
     """
-    Llamada a GPT-4o con la tool declarada.  Devolvemos el objeto completo
-    para inspeccionar finish_reason y posibles tool_calls.
+    GPT decide si contesta directo o invoca la tool get_price.
     """
     rsp = openai.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user",   "content": user_text},
+            {
+                "role": "system",
+                "content": (
+                    "Eres un asistente conciso en español.\n\n"
+                    "• Si el usuario pide un precio real ⇒ usa la función get_price.\n"
+                    "• Si la función devuelve la bandera \"#\" significa que no se encontró "
+                    "precio en los sitios web; en ese caso responde con un precio de "
+                    "referencia aproximado basado en tu conocimiento general, dejando claro "
+                    "que es estimado.\n"
+                    "Responde siempre en guaraníes (Gs) cuando des cifras."
+                ),
+            },
+            {"role": "user", "content": user_text},
         ],
         tools=[price_function],
         tool_choice="auto",
@@ -101,25 +94,19 @@ async def chat_gpt(user_text: str) -> Any:
     return rsp
 
 
-# ---------------------------------------------------------------------------
-# 2) enviar mensaje a WhatsApp
-# ---------------------------------------------------------------------------
-
+# ────────────────── WhatsApp Cloud API helpers ───────────────────────
 async def send_whatsapp(to: str, text: str) -> None:
-    """
-    Envía `text` (<= 4096 caracteres) al número `to` mediante WhatsApp Cloud API.
-    """
     if not (PHONE_ID and ACCESS_TOKEN):
         logging.warning("WA credentials missing; skipping send.")
         return
 
     headers = {
         "Authorization": f"Bearer {ACCESS_TOKEN}",
-        "Content-Type":  "application/json",
+        "Content-Type": "application/json",
     }
     data = {
         "messaging_product": "whatsapp",
-        "to":   to,
+        "to": to,
         "type": "text",
         "text": {"body": text[:4096]},
     }
@@ -128,14 +115,8 @@ async def send_whatsapp(to: str, text: str) -> None:
         r.raise_for_status()
 
 
-# ---------------------------------------------------------------------------
-# 3) llamada interna al endpoint /api/v1/price  (nuestro scraper)
-# ---------------------------------------------------------------------------
-
-async def call_price_endpoint(product: str) -> Dict[str, Any]:
-    """
-    Envía {"product": ...} al endpoint interno /price y devuelve el JSON.
-    """
+# ──────────────── llamada interna al micro-scraper ───────────────────
+async def call_price_endpoint(product: str) -> dict:
     url = f"http://127.0.0.1:{INTERNAL_PORT}{settings.API_V1_STR}/price"
     async with httpx.AsyncClient(timeout=20) as client:
         r = await client.post(url, json={"product": product})
@@ -143,15 +124,9 @@ async def call_price_endpoint(product: str) -> Dict[str, Any]:
         return r.json()
 
 
-# ---------------------------------------------------------------------------
-# 4) Webhook (WhatsApp Cloud API)
-# ---------------------------------------------------------------------------
-
+# ────────────────────────── Webhooks WA ──────────────────────────────
 @app.get("/webhook", tags=["webhook"])
 async def verify(request: Request):
-    """
-    Verificación inicial de Facebook (GET).
-    """
     q = request.query_params
     if q.get("hub.mode") == "subscribe" and q.get("hub.verify_token") == VERIFY_TOKEN:
         return PlainTextResponse(q.get("hub.challenge") or "")
@@ -160,95 +135,50 @@ async def verify(request: Request):
 
 @app.post("/webhook", tags=["webhook"])
 async def receive(request: Request):
-    """
-    1. Recibe evento de WhatsApp.
-    2. Pasa el texto a GPT (con tools).
-    3. Si GPT pide get_price ➜ llama a /price y hace una 2ª consulta.
-    4. Envía la respuesta final al usuario.
-    """
     body = await request.json()
     logging.info(body)
 
-    # --- extraer mensaje entrante ---
+    # ignorar updates sin messages
     try:
         msg = body["entry"][0]["changes"][0]["value"]["messages"][0]
     except (KeyError, IndexError):
-        return {"status": "ignored"}          # no es mensaje de texto normal
+        return {"status": "ignored"}
 
-    user_text: str = msg["text"]["body"]
-    wid:       str = msg["from"]             # WhatsApp ID del usuario
+    user_text = msg["text"]["body"]
+    wid       = msg["from"]
 
-    # -----------------------------------------------------------------------
-    # PRIMERA llamada a GPT
-    # -----------------------------------------------------------------------
-    first_rsp  = await chat_gpt(user_text)
-    choice     = first_rsp.choices[0]
+    # ── 1ª pasada GPT ────────────────────────────────────────────────
+    first_rsp = chat_gpt(user_text)
+    choice    = first_rsp.choices[0]
 
-    # La API 2024-05-01 usa finish_reason = "tool_calls" (plural)
-    is_tool_call = (
-        choice.finish_reason == "tool_calls"
-        or (choice.message and getattr(choice.message, "tool_calls", None))
-    )
-
-    if is_tool_call:
-        # ---------------------------------------------------------------
-        # GPT solicitó get_price → ejecutamos el scraper
-        # ---------------------------------------------------------------
-        tool_call   = choice.message.tool_calls[0]
-        args        = json.loads(tool_call.function.arguments)
-        product     = args["product"]
+    if choice.finish_reason == "tool_call":
+        args = json.loads(choice.message.tool_call.arguments)
+        product = args["product"]
 
         try:
             price_json = await call_price_endpoint(product)
         except Exception as exc:
             logging.exception("Error en /price: %s", exc)
-            price_json = {"error": str(exc), "product": product}
+            price_json = {"price": "#", "product": product, "error": str(exc)}
 
-        # ---------------------------------------------------------------
-        # SEGUNDA llamada a GPT: formatear la respuesta final
-        # ---------------------------------------------------------------
-        second_messages: List[Dict[str, Any]] = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user",   "content": user_text},
-            # assistant indica que llamó a la función
-            {
-                "role": "assistant",
-                "tool_calls": [
-                    {
-                        "id":        tool_call.id,
-                        "type":      "function",
-                        "function": {
-                            "name":       "get_price",
-                            "arguments":  tool_call.function.arguments,
-                        },
-                    }
-                ],
-                "content": None,
-            },
-            # respuesta de la función
-            {
-                "role":         "tool",
-                "tool_call_id": tool_call.id,
-                "name":         "get_price",
-                "content":      json.dumps(price_json),
-            },
-        ]
-
+        # ── 2ª pasada con el resultado del scraper ────────────────────
         second_rsp = openai.chat.completions.create(
             model="gpt-4o-mini",
-            messages=second_messages,
-            max_tokens=200,
+            messages=[
+                *first_rsp.messages,
+                {
+                    "role": "tool",
+                    "name": "get_price",
+                    "content": json.dumps(price_json, ensure_ascii=False),
+                },
+            ],
+            max_tokens=250,
         )
-        answer = (second_rsp.choices[0].message.content or "").strip()
-
+        answer = second_rsp.choices[0].message.content.strip()
     else:
-        # GPT contestó directamente (sin tool)
-        answer = (choice.message.content or "").strip()
+        # GPT contestó directo
+        answer = choice.message.content.strip()
 
-    # -----------------------------------------------------------------------
-    # enviar al usuario
-    # -----------------------------------------------------------------------
     logging.info("GPT reply: %s", answer)
     await send_whatsapp(wid, answer)
-
     return {"status": "ok"}
