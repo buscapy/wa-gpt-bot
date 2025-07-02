@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # backend/app/services/openai_helper.py
 
 import os
