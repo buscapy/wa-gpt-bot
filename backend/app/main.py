@@ -3,11 +3,11 @@
 import os
 import json
 import logging
-from typing import Any
+from typing import Any, Tuple
 
 import sentry_sdk
-import openai                  # SDK oficial de OpenAI
-import httpx                   # Cliente HTTP async
+import openai                    # SDK oficial de OpenAI
+import httpx                     # Cliente HTTP async
 from fastapi import FastAPI, Request, status
 from fastapi.responses import PlainTextResponse
 from fastapi.routing import APIRoute
@@ -16,7 +16,7 @@ from starlette.middleware.cors import CORSMiddleware
 from app.api.main import api_router
 from app.api.v1.price import router as price_router
 from app.core.config import settings
-from app.gpt.tools import price_function   # ← tool definida en app/gpt/tools.py
+from app.gpt.tools import price_function            # ← tool definida en app/gpt/tools.py
 
 
 # ---------- Configuración base FastAPI ---------- #
@@ -56,8 +56,8 @@ def read_root() -> dict:
 
 
 # ---------- Routers de la API v1 ---------- #
-app.include_router(api_router,   prefix=settings.API_V1_STR)              # router central
-app.include_router(price_router, prefix=settings.API_V1_STR, tags=["price"])  # /api/v1/price
+app.include_router(api_router,   prefix=settings.API_V1_STR)                    # router central
+app.include_router(price_router, prefix=settings.API_V1_STR, tags=["price"])    # /api/v1/price
 
 
 # ---------- Variables de entorno ---------- #
@@ -71,29 +71,33 @@ INTERNAL_PORT  = os.getenv("PORT", "10000")        # Render expone PORT=10000
 
 
 # ---------- GPT con “tools” ---------- #
-async def chat_gpt(user_text: str) -> Any:
+async def chat_gpt(user_text: str) -> Tuple[openai.types.chat.chat_completion.ChatCompletion, list]:
     """
-    Primera llamada: GPT decide si responde directo
-    o si necesita llamar a la tool get_price.
-    Devuelve el objeto Response completo (no sólo el texto).
+    Primera llamada: GPT decide si responde directo o si invoca la tool get_price.
+    Devuelve (rsp, messages) donde:
+
+    • rsp       … objeto ChatCompletion
+    • messages  … lista con el historial ya enviado (system + user)
     """
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Eres un asistente conciso en español. "
+                "Cuando el usuario pida un precio real usa la función get_price."
+            ),
+        },
+        {"role": "user", "content": user_text},
+    ]
+
     rsp = openai.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "Eres un asistente conciso en español. "
-                    "Cuando el usuario pida un precio real usa la función get_price."
-                ),
-            },
-            {"role": "user", "content": user_text},
-        ],
+        messages=messages,
         tools=[price_function],
         tool_choice="auto",
         max_tokens=300,
     )
-    return rsp
+    return rsp, messages
 
 
 # ---------- Enviar mensaje a WhatsApp ---------- #
@@ -121,7 +125,7 @@ async def send_whatsapp(to: str, text: str) -> None:
 async def call_price_endpoint(product: str) -> dict:
     """
     Envía { "product": ... } al endpoint interno /api/v1/price
-    y devuelve el JSON de respuesta.
+    y devuelve el JSON resultante.
     """
     url = f"http://127.0.0.1:{INTERNAL_PORT}{settings.API_V1_STR}/price"
     async with httpx.AsyncClient(timeout=20) as client:
@@ -155,18 +159,18 @@ async def receive(request: Request):
     try:
         msg = body["entry"][0]["changes"][0]["value"]["messages"][0]
     except (KeyError, IndexError):
-        return {"status": "ignored"}   # sólo status, no hay texto
+        return {"status": "ignored"}   # no hay mensaje de usuario
 
     user_text = msg["text"]["body"]
     wid       = msg["from"]
 
     # ---------- 1ª llamada a GPT ----------
-    first_rsp = await chat_gpt(user_text)
-    choice    = first_rsp.choices[0]
+    first_rsp, messages = await chat_gpt(user_text)
+    choice = first_rsp.choices[0]
 
     if choice.finish_reason == "tool_call":
-        # GPT quiere la función get_price
-        args = json.loads(choice.message.tool_call.arguments)
+        # GPT invocó la función get_price
+        args    = json.loads(choice.message.tool_call.arguments)
         product = args["product"]
 
         try:
@@ -175,20 +179,27 @@ async def receive(request: Request):
             logging.exception("Error en /price: %s", exc)
             price_json = {"error": str(exc), "product": product}
 
+        # Añadimos al historial la llamada de la tool…
+        messages.append({
+            "role": "assistant",
+            "tool_call": choice.message.tool_call,
+            "content": None,
+        })
+        # …y la respuesta del scraper
+        messages.append({
+            "role": "tool",
+            "name": "get_price",
+            "content": json.dumps(price_json),
+        })
+
         # ---------- 2ª llamada : GPT formatea la respuesta ----------
         second_rsp = openai.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[
-                *first_rsp.messages,                       # historial
-                {
-                    "role": "tool",
-                    "name": "get_price",
-                    "content": json.dumps(price_json),
-                },
-            ],
+            messages=messages,
             max_tokens=200,
         )
         answer = second_rsp.choices[0].message.content.strip()
+
     else:
         # GPT respondió directo
         answer = choice.message.content.strip()
