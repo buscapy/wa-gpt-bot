@@ -99,6 +99,25 @@ async def send_whatsapp(to: str, text: str):
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.post(GRAPH_API_URL, headers=headers, json=data)
         r.raise_for_status()   # lanza excepción si falla
+from app.gpt.tools import price_function
+
+async def chat_gpt(user_text: str):
+    rsp = openai.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system",
+             "content": (
+               "Eres un asistente en español que contesta preguntas generales. "
+               "Si el usuario pregunta un precio real usa la función get_price."
+             )
+            },
+            {"role": "user", "content": user_text}
+        ],
+        tools=[price_function],
+        tool_choice="auto",
+        max_tokens=300,
+    )
+    return rsp
 
 
 # ---------- Webhook de WhatsApp Cloud API ---------- #
