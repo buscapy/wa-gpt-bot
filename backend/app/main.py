@@ -141,7 +141,6 @@ async def receive(request: Request):
     except Exception as exc:
         logging.exception("Error procesando mensaje: %s", exc)
 
-    # --- decidir si incluimos la respuesta en el body ---
     debug_env    = os.getenv("DEBUG_ECHO", "false").lower() == "true"
     debug_header = request.headers.get("x-debug") == "1"
 
