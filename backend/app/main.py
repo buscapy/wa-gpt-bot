@@ -148,7 +148,7 @@ async def receive(request: Request):
     user_text = msg.get("text", {}).get("body", "") or ""
     wid       = msg.get("from", "")
 
-    # ── 1ª pasada GPT ────────────────────────────────────────────────
+    # — 1ª pasada GPT —
     first_rsp = await chat_gpt(user_text)
     choice    = first_rsp.choices[0]
     finish    = choice.finish_reason
@@ -156,13 +156,14 @@ async def receive(request: Request):
 
     # detectar llamada a herramienta/función
     if finish in ("tool_call", "tool_calls", "function_call"):
-        # extraer argumentos de la llamada
-        if hasattr(choice.message, "tool_call") and choice.message.tool_call:
-            args_str = choice.message.tool_call.arguments
-        elif hasattr(choice.message, "tool_calls") and choice.message.tool_calls:
-            args_str = choice.message.tool_calls[0].arguments
-        elif hasattr(choice.message, "function_call") and choice.message.function_call:
-            args_str = choice.message.function_call.arguments
+        # convertir el mensaje a dict para extraer arguments
+        msg_dict = choice.message.dict()
+        if "tool_call" in msg_dict and msg_dict["tool_call"]:
+            args_str = msg_dict["tool_call"]["arguments"]
+        elif "tool_calls" in msg_dict and msg_dict["tool_calls"]:
+            args_str = msg_dict["tool_calls"][0]["arguments"]
+        elif "function_call" in msg_dict and msg_dict["function_call"]:
+            args_str = msg_dict["function_call"]["arguments"]
         else:
             args_str = "{}"
 
@@ -175,7 +176,7 @@ async def receive(request: Request):
             logging.exception("Error en /price: %s", exc)
             price_json = {"price": "#", "product": product, "error": str(exc)}
 
-        # ── 2ª pasada: formatear resultado JSON ──────────────────────
+        # — 2ª pasada: formatear resultado JSON —
         format_prompt = {
             "role": "system",
             "content": (
@@ -195,7 +196,7 @@ async def receive(request: Request):
         answer = (second_rsp.choices[0].message.content or "").strip()
         logging.info("Second GPT answer: %r", answer)
     else:
-        # respuesta directa sin herramienta
+        # respuesta directa sin invocar herramienta
         answer = (choice.message.content or "").strip()
 
     logging.info("GPT reply to send: %r", answer)
