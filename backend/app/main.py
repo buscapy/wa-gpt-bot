@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import json
 import logging
+import asyncio
 from typing import Any
 
 import sentry_sdk
@@ -22,7 +23,6 @@ from app.gpt.tools import price_function
 # ────────────────────────── FastAPI base ─────────────────────────────
 def custom_generate_unique_id(route: APIRoute) -> str:
     return f"{route.tags[0]}-{route.name}"
-
 
 if settings.SENTRY_DSN and settings.ENVIRONMENT != "local":
     sentry_sdk.init(dsn=str(settings.SENTRY_DSN), enable_tracing=True)
@@ -47,30 +47,29 @@ if settings.all_cors_origins:
 def ping() -> dict:
     return {"message": "pong"}
 
-
 @app.get("/", tags=["root"])
 def read_root() -> dict:
     return {"message": "Welcome to wa-gpt-bot API"}
 
-
 app.include_router(api_router,   prefix=settings.API_V1_STR)
 app.include_router(price_router, prefix=settings.API_V1_STR, tags=["price"])
 
-# ─────────────────── credenciales & contantes ───────────────────────
+# ─────────────────── credenciales & constantes ──────────────────────
 VERIFY_TOKEN   = os.getenv("WA_VERIFY_TOKEN", "olindarivas")
 PHONE_ID       = os.getenv("WA_PHONE_NUMBER_ID")
 ACCESS_TOKEN   = os.getenv("WA_ACCESS_TOKEN")
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 GRAPH_API_URL  = f"https://graph.facebook.com/v19.0/{PHONE_ID}/messages"
-INTERNAL_PORT  = os.getenv("PORT", "10000")               # Render expone PORT=10000
+INTERNAL_PORT  = os.getenv("PORT", "10000")
 
 # ───────────────────── GPT — primera pasada ─────────────────────────
-def chat_gpt(user_text: str) -> Any:
+async def chat_gpt(user_text: str) -> Any:
     """
     GPT decide si contesta directo o invoca la tool get_price.
     """
-    rsp = openai.chat.completions.create(
+    return await asyncio.to_thread(
+        openai.chat.completions.create,
         model="gpt-4o-mini",
         messages=[
             {
@@ -91,8 +90,6 @@ def chat_gpt(user_text: str) -> Any:
         tool_choice="auto",
         max_tokens=300,
     )
-    return rsp
-
 
 # ────────────────── WhatsApp Cloud API helpers ───────────────────────
 async def send_whatsapp(to: str, text: str) -> None:
@@ -114,7 +111,6 @@ async def send_whatsapp(to: str, text: str) -> None:
         r = await client.post(GRAPH_API_URL, headers=headers, json=data)
         r.raise_for_status()
 
-
 # ──────────────── llamada interna al micro-scraper ───────────────────
 async def call_price_endpoint(product: str) -> dict:
     url = f"http://127.0.0.1:{INTERNAL_PORT}{settings.API_V1_STR}/price"
@@ -123,7 +119,6 @@ async def call_price_endpoint(product: str) -> dict:
         r.raise_for_status()
         return r.json()
 
-
 # ────────────────────────── Webhooks WA ──────────────────────────────
 @app.get("/webhook", tags=["webhook"])
 async def verify(request: Request):
@@ -131,7 +126,6 @@ async def verify(request: Request):
     if q.get("hub.mode") == "subscribe" and q.get("hub.verify_token") == VERIFY_TOKEN:
         return PlainTextResponse(q.get("hub.challenge") or "")
     return PlainTextResponse("error", status_code=status.HTTP_403_FORBIDDEN)
-
 
 @app.post("/webhook", tags=["webhook"])
 async def receive(request: Request):
@@ -148,12 +142,12 @@ async def receive(request: Request):
     wid       = msg["from"]
 
     # ── 1ª pasada GPT ────────────────────────────────────────────────
-    first_rsp = chat_gpt(user_text)
+    first_rsp = await chat_gpt(user_text)
     choice    = first_rsp.choices[0]
 
     if choice.finish_reason == "tool_call":
-        args = json.loads(choice.message.tool_call.arguments)
-        product = args["product"]
+        args    = json.loads(choice.message.tool_call.arguments)
+        product = args.get("product", user_text)
 
         try:
             price_json = await call_price_endpoint(product)
@@ -174,10 +168,11 @@ async def receive(request: Request):
             ],
             max_tokens=250,
         )
-        answer = second_rsp.choices[0].message.content.strip()
+        content = second_rsp.choices[0].message.content or ""
+        answer  = content.strip()
     else:
-        # GPT contestó directo
-        answer = choice.message.content.strip()
+        content = choice.message.content or ""
+        answer  = content.strip()
 
     logging.info("GPT reply: %s", answer)
     await send_whatsapp(wid, answer)
