@@ -120,11 +120,7 @@ async def send_whatsapp(to: str, text: str) -> None:
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.post(GRAPH_API_URL, headers=headers, json=data)
         if r.status_code != 200:
-            logging.error(
-                "WA send failed [%s]: %s",
-                r.status_code,
-                r.text,
-            )
+            logging.error("WA send failed [%s]: %s", r.status_code, r.text)
         r.raise_for_status()
 
 # ──────────────── llamada interna al micro-scraper ───────────────────
@@ -172,23 +168,34 @@ async def receive(request: Request):
             price_json = {"price": "#", "product": product, "error": str(exc)}
 
         # ── 2ª pasada con el resultado del scraper ────────────────────
-        second_rsp = openai.chat.completions.create(
+        system_msg = {
+            "role": "system",
+            "content": (
+                "Eres un asistente conciso en español.\n\n"
+                "• Si el usuario pide un precio real ⇒ usa la función get_price.\n"
+                "• Si la función devuelve la bandera \"#\" significa que no se encontró "
+                "precio en los sitios web; en ese caso responde con un precio de "
+                "referencia aproximado basado en tu conocimiento general, dejando claro "
+                "que es estimado.\n"
+                "Responde siempre en guaraníes (Gs) cuando des cifras."
+            ),
+        }
+        user_msg = {"role": "user", "content": user_text}
+        tool_msg = {
+            "role": "tool",
+            "name": "get_price",
+            "content": json.dumps(price_json, ensure_ascii=False),
+        }
+
+        second_rsp = await asyncio.to_thread(
+            openai.chat.completions.create,
             model="gpt-4o-mini",
-            messages=[
-                *first_rsp.messages,
-                {
-                    "role": "tool",
-                    "name": "get_price",
-                    "content": json.dumps(price_json, ensure_ascii=False),
-                },
-            ],
+            messages=[system_msg, user_msg, tool_msg],
             max_tokens=250,
         )
-        content = second_rsp.choices[0].message.content or ""
-        answer  = content.strip()
+        answer = (second_rsp.choices[0].message.content or "").strip()
     else:
-        content = choice.message.content or ""
-        answer  = content.strip()
+        answer = (choice.message.content or "").strip()
 
     logging.info("GPT reply: %s", answer)
     await send_whatsapp(wid, answer)
