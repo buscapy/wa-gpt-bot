@@ -1,40 +1,31 @@
-from __future__ import annotations
+# app/api/v1/price.py
 
-from fastapi import APIRouter
-from pydantic import BaseModel
-
-from app.services.openai_helper import get_price_url
+from fastapi import APIRouter, HTTPException
+from typing import Any, Dict, List, Union
+from app.services.openai_helper import get_price_url, format_price_msg
 from app.scrapers.basic import scrape
 
 router = APIRouter()
 
-
-class PriceIn(BaseModel):
-    product: str
-
-
-@router.post("/price")
-async def get_price(payload: PriceIn) -> dict:
+@router.post("/price", response_model=Dict[str, Any])
+async def get_price(body: Dict[str, Any]):
     """
-    • Construye la URL con la ayuda de openai_helper
-    • Lanza el scraper
-    • Devuelve:
-
-        – {"price":"#", "product": … }               si el scraper no halló datos
-        – {"price": "...", "shop": "...", ... }      con el primer match
+    Recibe {"product": "<nombre>"}.
+    Devuelve {"messages": [...]} o {"messages": [], "error":"no_data"}.
     """
-    url = get_price_url(payload.product)
-    data = scrape(url)
+    product = body.get("product", "").strip()
+    if not product:
+        raise HTTPException(status_code=400, detail="Falta el parámetro product")
 
-    # ── 1) bandera “sin datos” ────────────────────────────────────────
+    url = get_price_url(product)
+    data: Union[List[Dict], Dict] = scrape(url)
+
+    # Detectamos la bandera de "sin datos"
     if isinstance(data, dict) and data.get("price") == "#":
-        return {"price": "#", "product": payload.product}
+        return {"messages": [], "error": "no_data"}
 
-    # ── 2) al menos un precio válido ──────────────────────────────────
-    if isinstance(data, list) and data:
-        first = data[0]
-        first["product"] = payload.product
-        return first
+    if not isinstance(data, list):
+        raise HTTPException(status_code=500, detail="Formato de datos inesperado")
 
-    # ── 3) cualquier otro caso inesperado ─────────────────────────────
-    return {"price": "#", "product": payload.product}
+    messages: List[str] = format_price_msg(product, data)
+    return {"messages": messages}
