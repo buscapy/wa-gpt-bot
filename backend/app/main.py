@@ -65,9 +65,6 @@ INTERNAL_PORT  = os.getenv("PORT", "10000")
 
 # ───────────────────── GPT — primera pasada ─────────────────────────
 async def chat_gpt(user_text: str) -> Any:
-    """
-    GPT decide si contesta directo o invoca la tool get_price.
-    """
     return await asyncio.to_thread(
         openai.chat.completions.create,
         model="gpt-4o-mini",
@@ -77,10 +74,9 @@ async def chat_gpt(user_text: str) -> Any:
                 "content": (
                     "Eres un asistente conciso en español.\n\n"
                     "• Si el usuario pide un precio real ⇒ usa la función get_price.\n"
-                    "• Si la función devuelve la bandera \"#\" significa que no se encontró "
+                    "• Si la función devuelve la bandera “#” significa que no se encontró "
                     "precio en los sitios web; en ese caso responde con un precio de "
-                    "referencia aproximado basado en tu conocimiento general, dejando claro "
-                    "que es estimado.\n"
+                    "referencia aproximado, dejando claro que es estimado.\n"
                     "Responde siempre en guaraníes (Gs) cuando des cifras."
                 ),
             },
@@ -97,7 +93,6 @@ async def send_whatsapp(to: str, text: str) -> None:
         logging.warning("WA credentials missing; skipping send.")
         return
 
-    # Evitar enviar mensajes vacíos
     body_text = (text or "").strip()
     if not body_text:
         logging.warning("Empty message; skipping send.")
@@ -144,7 +139,6 @@ async def receive(request: Request):
     body = await request.json()
     logging.info(body)
 
-    # ignorar updates sin messages
     try:
         msg = body["entry"][0]["changes"][0]["value"]["messages"][0]
     except (KeyError, IndexError):
@@ -153,9 +147,10 @@ async def receive(request: Request):
     user_text = msg.get("text", {}).get("body", "") or ""
     wid       = msg.get("from", "")
 
-    # ── 1ª pasada GPT ────────────────────────────────────────────────
+    # — 1ª pasada GPT —
     first_rsp = await chat_gpt(user_text)
     choice    = first_rsp.choices[0]
+    logging.info("First GPT finish_reason: %s", choice.finish_reason)
 
     if choice.finish_reason == "tool_call":
         args    = json.loads(choice.message.tool_call.arguments)
@@ -167,36 +162,28 @@ async def receive(request: Request):
             logging.exception("Error en /price: %s", exc)
             price_json = {"price": "#", "product": product, "error": str(exc)}
 
-        # ── 2ª pasada con el resultado del scraper ────────────────────
-        system_msg = {
+        # — 2ª pasada: formatear resultado JSON —
+        format_prompt = {
             "role": "system",
             "content": (
-                "Eres un asistente conciso en español.\n\n"
-                "• Si el usuario pide un precio real ⇒ usa la función get_price.\n"
-                "• Si la función devuelve la bandera \"#\" significa que no se encontró "
-                "precio en los sitios web; en ese caso responde con un precio de "
-                "referencia aproximado basado en tu conocimiento general, dejando claro "
-                "que es estimado.\n"
-                "Responde siempre en guaraníes (Gs) cuando des cifras."
+                "Eres un formateador: recibes un JSON con el precio encontrado "
+                "y debes devolver únicamente un texto en español, en guaraníes (Gs), "
+                "incluyendo el precio y aclarando si es estimado. No repitas JSON."
             ),
         }
-        user_msg = {"role": "user", "content": user_text}
-        tool_msg = {
-            "role": "tool",
-            "name": "get_price",
-            "content": json.dumps(price_json, ensure_ascii=False),
-        }
+        json_msg = {"role": "user", "content": json.dumps(price_json, ensure_ascii=False)}
 
         second_rsp = await asyncio.to_thread(
             openai.chat.completions.create,
             model="gpt-4o-mini",
-            messages=[system_msg, user_msg, tool_msg],
+            messages=[format_prompt, json_msg],
             max_tokens=250,
         )
         answer = (second_rsp.choices[0].message.content or "").strip()
+        logging.info("Second GPT answer: %r", answer)
     else:
         answer = (choice.message.content or "").strip()
 
-    logging.info("GPT reply: %s", answer)
+    logging.info("GPT reply to send: %r", answer)
     await send_whatsapp(wid, answer)
     return {"status": "ok"}
