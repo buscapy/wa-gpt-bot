@@ -158,16 +158,20 @@ async def receive(request: Request):
     if finish in ("tool_call", "tool_calls", "function_call"):
         # convertir el mensaje a dict para extraer arguments
         msg_dict = choice.message.dict()
-        if "tool_call" in msg_dict and msg_dict["tool_call"]:
-            args_str = msg_dict["tool_call"]["arguments"]
-        elif "tool_calls" in msg_dict and msg_dict["tool_calls"]:
-            args_str = msg_dict["tool_calls"][0]["arguments"]
-        elif "function_call" in msg_dict and msg_dict["function_call"]:
-            args_str = msg_dict["function_call"]["arguments"]
-        else:
-            args_str = "{}"
 
-        args    = json.loads(args_str)
+        # Unificar extracción de arguments de cualquier variante
+        call_info = None
+        if msg_dict.get("tool_call"):
+            call_info = msg_dict["tool_call"]
+        elif msg_dict.get("tool_calls"):
+            call_info = msg_dict["tool_calls"][0]
+        elif msg_dict.get("function_call"):
+            call_info = msg_dict["function_call"]
+
+        args_str = "{}"
+        if isinstance(call_info, dict) and "arguments" in call_info:
+            args_str = call_info["arguments"]
+        args = json.loads(args_str)
         product = args.get("product", user_text)
 
         try:
