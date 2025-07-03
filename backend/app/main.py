@@ -97,6 +97,12 @@ async def send_whatsapp(to: str, text: str) -> None:
         logging.warning("WA credentials missing; skipping send.")
         return
 
+    # Evitar enviar mensajes vacíos
+    body_text = (text or "").strip()
+    if not body_text:
+        logging.warning("Empty message; skipping send.")
+        return
+
     headers = {
         "Authorization": f"Bearer {ACCESS_TOKEN}",
         "Content-Type": "application/json",
@@ -105,10 +111,20 @@ async def send_whatsapp(to: str, text: str) -> None:
         "messaging_product": "whatsapp",
         "to": to,
         "type": "text",
-        "text": {"body": text[:4096]},
+        "text": {
+            "preview_url": False,
+            "body": body_text[:4096],
+        },
     }
+
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.post(GRAPH_API_URL, headers=headers, json=data)
+        if r.status_code != 200:
+            logging.error(
+                "WA send failed [%s]: %s",
+                r.status_code,
+                r.text,
+            )
         r.raise_for_status()
 
 # ──────────────── llamada interna al micro-scraper ───────────────────
@@ -138,8 +154,8 @@ async def receive(request: Request):
     except (KeyError, IndexError):
         return {"status": "ignored"}
 
-    user_text = msg["text"]["body"]
-    wid       = msg["from"]
+    user_text = msg.get("text", {}).get("body", "") or ""
+    wid       = msg.get("from", "")
 
     # ── 1ª pasada GPT ────────────────────────────────────────────────
     first_rsp = await chat_gpt(user_text)
