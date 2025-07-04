@@ -97,6 +97,20 @@ To test the backend run:
 $ bash ./scripts/test.sh
 ```
 
+The script relies on Docker Compose to build the images and start the stack
+used for testing, so Docker must be installed and running for it to work.
+If your environment doesn't support Docker, install the dependencies locally
+and run the tests directly with `pytest`:
+
+```console
+$ cd backend
+$ uv sync  # or ``pip install -r requirements.txt``
+$ pytest
+```
+
+Make sure you have a PostgreSQL database available and that the environment
+variables in `.env` point to it before running the tests.
+
 The tests run with Pytest, modify and add tests to `./backend/app/tests/`.
 
 If you use GitHub Actions the tests will run automatically.
