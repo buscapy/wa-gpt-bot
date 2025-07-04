@@ -35,6 +35,8 @@ def get_price_url(product: str) -> str:
     return resp.choices[0].message.content.strip()
 
 def format_price_msg(product: str, data: dict) -> list[str]:
+    """Use OpenAI to create two WhatsApp messages from price data."""
+
     prompt = (
         f"Tengo estos datos JSON sobre “{product}”: {data}. "
         "Escribe máximo dos mensajes de WhatsApp:"
