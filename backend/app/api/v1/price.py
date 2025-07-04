@@ -21,6 +21,7 @@ async def get_price(body: Dict[str, Any]):
     if not product:
         raise HTTPException(status_code=400, detail="Falta el parámetro product")
 
+    # Determinar la URL para scrapear de forma local
     url = get_price_url(product)
 
     start = time.time()
