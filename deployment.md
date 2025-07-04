@@ -257,7 +257,7 @@ You can read more about it in the official guide: [Configuring the self-hosted r
 
 On your repository, configure secrets for the environment variables you need, the same ones described above, including `SECRET_KEY`, etc. Follow the [official GitHub guide for setting repository secrets](https://docs.github.com/en/actions/security-guides/using-secrets-in-github-actions#creating-secrets-for-a-repository).
 
-The current Github Actions workflows expect these secrets:
+The current GitHub Actions workflows expect these secrets:
 
 * `DOMAIN_PRODUCTION`
 * `DOMAIN_STAGING`
