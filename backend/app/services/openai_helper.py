@@ -8,7 +8,7 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 
 def get_price_url(product: str) -> str:
     prompt = (
-        f"Dame una URL confiable para scrapear el mejor precio de “{product}” "
+        f"Dame una URL confiable para scrapear el mejor precio de \"{product}\" "
         "(MercadoLibre, Frávega, etc.). Responde solo con la URL."
     )
     resp = client.chat.completions.create(
@@ -19,7 +19,7 @@ def get_price_url(product: str) -> str:
 
 def format_price_msg(product: str, data: dict) -> list[str]:
     prompt = (
-        f"Tengo estos datos JSON sobre “{product}”: {data}. "
+        f"Tengo estos datos JSON sobre \"{product}\": {data}. "
         "Escribe máximo dos mensajes de WhatsApp:"
         "1) precio y comercio"
         "2) recomendación breve"
