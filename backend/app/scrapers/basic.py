@@ -45,6 +45,23 @@ def _parse_fravega(soup: BeautifulSoup) -> List[Dict]:
     return results
 
 
+def _parse_tupy(soup: BeautifulSoup) -> List[Dict]:
+    results: List[Dict] = []
+    for card in soup.select("div.product-item"):
+        price_el = card.select_one(".product-price")
+        if not price_el:
+            continue
+        results.append(
+            {
+                "price": price_el.get_text(strip=True),
+                "date": datetime.utcnow().isoformat(),
+                "shop": "Tupy",
+                "city": "",
+            }
+        )
+    return results
+
+
 def scrape(url: str) -> Union[List[Dict], Dict]:
     """Extrae precios de la URL indicada.
 
@@ -64,6 +81,8 @@ def scrape(url: str) -> Union[List[Dict], Dict]:
             results = _parse_mercadolibre(soup)
         elif "fravega" in url.lower():
             results = _parse_fravega(soup)
+        elif "tupy.com.py" in url.lower():
+            results = _parse_tupy(soup)
         else:
             logging.warning("Unknown site for URL: %s", url)
             results = []
