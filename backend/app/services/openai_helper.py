@@ -1,9 +1,18 @@
 # backend/app/services/openai_helper.py
 
 import os
+import logging
 from openai import OpenAI, ChatCompletion
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    message = "OPENAI_API_KEY environment variable is not set"
+    logger.error(message)
+    raise RuntimeError(message)
+
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 def get_price_url(product: str) -> str:
