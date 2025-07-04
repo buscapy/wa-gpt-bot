@@ -8,7 +8,22 @@ from openai import OpenAI, ChatCompletion
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 client = OpenAI(api_key=OPENAI_API_KEY)
 
+ELECTRO_KEYWORDS = [
+    "heladera",
+    "lavarropa",
+    "microondas",
+    "cocina",
+    "licuadora",
+    "plancha",
+]
+
+
 def get_price_url(product: str) -> str:
+    lower = product.lower()
+    if any(word in lower for word in ELECTRO_KEYWORDS):
+        query = product.replace(" ", "+")
+        return f"https://www.tupy.com.py/buscar?q={query}"
+
     prompt = (
         f"Dame una URL confiable para scrapear el mejor precio de “{product}” "
         "(MercadoLibre, Frávega, etc.). Responde solo con la URL."
